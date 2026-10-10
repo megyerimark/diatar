@@ -1,0 +1,31 @@
+import assert from 'node:assert/strict';
+import ts from 'typescript';
+import { readFileSync,writeFileSync,mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
+const dir=mkdtempSync(join(tmpdir(),'diatar-demo-test-'));
+for(const name of ['models','demo']){
+ const source=readFileSync('frontend/src/app/core/'+name+'.ts','utf8').replace("from './models'","from './models.mjs'");
+ writeFileSync(join(dir,name+'.mjs'),ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ES2022}}).outputText);
+}
+const data=new Map();globalThis.localStorage={getItem:k=>data.get(k)||null,setItem:(k,v)=>data.set(k,v)};
+const {demoRequest:r}=await import(pathToFileURL(join(dir,'demo.mjs')).href);
+await assert.rejects(()=>r('/auth/me'),e=>e.status===401);
+await r('/auth/login','POST',{email:'demo@example.com',password:'demo'});
+assert.equal((await r('/presentations')).length,3);
+const first=await r('/access-codes','POST',{name:'Próbaóra',presentation_ids:[1],duration_minutes:30,allow_download:false});
+const second=await r('/access-codes','POST',{name:'Második óra',presentation_ids:[2],duration_minutes:30,allow_download:true});
+assert.notEqual(first.access.id,second.access.id);
+await r('/auth/logout','POST');
+await assert.rejects(()=>r('/classroom/enter','POST',{code:'XXXXX-XXXXX'}),e=>e.status===422);
+const room=await r('/classroom/enter','POST',{code:first.code.toLowerCase()});assert.equal(room.presentations.length,1);assert.equal(room.presentations[0].id,1);
+await assert.rejects(()=>r('/presentations'),e=>e.status===401);
+await assert.rejects(()=>r('/classroom/presentations/2'),e=>e.status===404);
+await assert.rejects(()=>r('/classroom/presentations/1/file'),e=>e.status===403);
+await r('/auth/login','POST',{email:'demo@example.com',password:'demo'});
+await r('/access-codes/'+first.access.id,'DELETE');
+await assert.rejects(()=>r('/classroom'),e=>e.status===403);
+await r('/classroom/enter','POST',{code:second.code});
+await r('/classroom/leave','POST');await assert.rejects(()=>r('/classroom'),e=>e.status===403);
+console.log('Demo workflow checks passed: owner access, unique IDs, code scope, download permission, revocation, and leave.');

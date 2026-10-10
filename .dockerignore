@@ -1,0 +1,11 @@
+node_modules
+.angular
+dist
+.git
+.openai
+.env
+backend/vendor
+backend/.env
+backend/storage
+*.zip
+*.tar.gz

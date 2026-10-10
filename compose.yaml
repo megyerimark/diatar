@@ -1,0 +1,61 @@
+x-backend: &backend
+  image: diatar-api:local
+  build:
+    context: ./backend
+  env_file: .env
+  volumes:
+    - diatar_storage:/var/www/html/storage
+services:
+  db:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: diatar
+      MYSQL_USER: diatar
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+    volumes:
+      - diatar_database:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "MYSQL_PWD=$$MYSQL_ROOT_PASSWORD mysqladmin ping -h localhost -u root --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+  migrate:
+    <<: *backend
+    command: ["php", "artisan", "migrate", "--force"]
+    depends_on:
+      db:
+        condition: service_healthy
+  app:
+    <<: *backend
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+  worker:
+    <<: *backend
+    restart: unless-stopped
+    command: ["php", "artisan", "queue:work", "--sleep=1", "--tries=2", "--timeout=100", "--max-time=3600"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+  scheduler:
+    <<: *backend
+    restart: unless-stopped
+    command: ["php", "artisan", "schedule:work"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    depends_on:
+      - app
+volumes:
+  diatar_storage:
+  diatar_database:
